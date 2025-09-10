@@ -1,0 +1,126 @@
+//@version=6
+indicator('Supertrend', overlay=true, format=format.price, precision=2)
+
+// ==== Inputs ====
+Periods = input(title='ATR Period', defval=10)
+src = input(hl2, title='Source')
+Multiplier = input.float(title='ATR Multiplier', step=0.1, defval=3.0)
+changeATR = input(title='Change ATR Calculation Method ?', defval=true)
+showsignals = input(title='Show Buy/Sell Signals ?', defval=true)
+highlighting = input(title='Highlighter On/Off ?', defval=true)
+
+// Module inputs (đã thêm)
+riskRewardRatio = input.float(2.0, "Risk/Reward Ratio", step=0.1)
+showTable       = input.bool(true, "Show Info Table?")
+tablePosition   = input.string("top_right", "Table Position", options=["top_left","top_center","top_right","middle_left","middle_center","middle_right","bottom_left","bottom_center","bottom_right"])
+
+// ==== Supertrend logic ====
+atr2 = ta.sma(ta.tr, Periods)
+atr = changeATR ? ta.atr(Periods) : atr2
+up = src - Multiplier * atr
+up1 = nz(up[1], up)
+up := close[1] > up1 ? math.max(up, up1) : up
+dn = src + Multiplier * atr
+dn1 = nz(dn[1], dn)
+dn := close[1] < dn1 ? math.min(dn, dn1) : dn
+trend = 1
+trend := nz(trend[1], trend)
+trend := trend == -1 and close > dn1 ? 1 : trend == 1 and close < up1 ? -1 : trend
+
+upPlot = plot(trend == 1 ? up : na, title='Up Trend', style=plot.style_linebr, linewidth=2, color=color.new(color.green, 0))
+buySignal = trend == 1 and trend[1] == -1
+plotshape(buySignal ? up : na, title='UpTrend Begins', location=location.absolute, style=shape.circle, size=size.tiny, color=color.new(color.green, 0))
+plotshape(buySignal and showsignals ? up : na, title='Buy', text='Buy', location=location.absolute, style=shape.labelup, size=size.tiny, color=color.new(color.green, 0), textcolor=color.new(color.white, 0))
+
+dnPlot = plot(trend == 1 ? na : dn, title='Down Trend', style=plot.style_linebr, linewidth=2, color=color.new(color.red, 0))
+sellSignal = trend == -1 and trend[1] == 1
+plotshape(sellSignal ? dn : na, title='DownTrend Begins', location=location.absolute, style=shape.circle, size=size.tiny, color=color.new(color.red, 0))
+plotshape(sellSignal and showsignals ? dn : na, title='Sell', text='Sell', location=location.absolute, style=shape.labeldown, size=size.tiny, color=color.new(color.red, 0), textcolor=color.new(color.white, 0))
+
+mPlot = plot(ohlc4, title='', style=plot.style_circles, linewidth=1, color=color.new(color.white, 100))
+longFillColor = highlighting ? (trend == 1 ? color.green : color.white) : color.white
+shortFillColor = highlighting ? (trend == -1 ? color.red : color.white) : color.white
+fill(mPlot, upPlot, title='UpTrend Highligter', color=color.new(longFillColor, 90))
+fill(mPlot, dnPlot, title='DownTrend Highligter', color=color.new(shortFillColor, 90))
+
+// ==== Entry, TP, SL ====
+var float entryPrice = na
+var float stopLoss   = na
+var float takeProfit = na
+float riskAmount     = na
+
+if buySignal
+    entryPrice := close
+    stopLoss   := up
+    riskAmount := entryPrice - stopLoss
+    takeProfit := entryPrice + (riskAmount * riskRewardRatio)
+
+if sellSignal
+    entryPrice := close
+    stopLoss   := dn
+    riskAmount := stopLoss - entryPrice
+    takeProfit := entryPrice - (riskAmount * riskRewardRatio)
+
+// ==== Table ====
+// var table khai báo toàn cục (không khai báo var trong if)
+var table infoTable = na
+
+if showTable and barstate.islast
+    // xóa bảng cũ nếu có
+    if not na(infoTable)
+        table.delete(infoTable)
+
+    // Vị trí bảng
+    tablePos = switch tablePosition
+        "top_left"      => position.top_left
+        "top_center"    => position.top_center
+        "top_right"     => position.top_right
+        "middle_left"   => position.middle_left
+        "middle_center" => position.middle_center
+        "middle_right"  => position.middle_right
+        "bottom_left"   => position.bottom_left
+        "bottom_center" => position.bottom_center
+        "bottom_right"  => position.bottom_right
+        => position.top_right
+
+    infoTable := table.new(tablePos, 2, 6, bgcolor=color.new(color.white, 80), border_width=2, border_color=color.new(color.gray, 50))
+
+    // Header
+    table.cell(infoTable, 0, 0, "SUPERTREND SIGNALS", text_color=color.white, bgcolor=color.new(color.blue, 20), text_size=size.normal)
+    table.cell(infoTable, 1, 0, "", text_color=color.white, bgcolor=color.new(color.blue, 20))
+
+    // Current trend
+    currentTrendText  = trend == 1 ? "UPTREND" : "DOWNTREND"
+    currentTrendColor = trend == 1 ? color.new(color.green, 30) : color.new(color.red, 30)
+    table.cell(infoTable, 0, 1, "Current Trend:", text_color=color.black, bgcolor=color.new(color.white, 30))
+    table.cell(infoTable, 1, 1, currentTrendText, text_color=color.white, bgcolor=currentTrendColor)
+
+    // Entry price
+    entryText = na(entryPrice) ? "Waiting..." : str.tostring(entryPrice, "#.####")
+    table.cell(infoTable, 0, 2, "Entry Price:", text_color=color.black, bgcolor=color.new(color.white, 30))
+    table.cell(infoTable, 1, 2, entryText, text_color=color.black, bgcolor=color.new(color.yellow, 70))
+
+    // Stop Loss
+    slText = na(stopLoss) ? "Waiting..." : str.tostring(stopLoss, "#.####")
+    table.cell(infoTable, 0, 3, "Stop Loss:", text_color=color.black, bgcolor=color.new(color.white, 30))
+    table.cell(infoTable, 1, 3, slText, text_color=color.white, bgcolor=color.new(color.red, 30))
+
+    // Take Profit
+    tpText = na(takeProfit) ? "Waiting..." : str.tostring(takeProfit, "#.####")
+    table.cell(infoTable, 0, 4, "Take Profit:", text_color=color.black, bgcolor=color.new(color.white, 30))
+    table.cell(infoTable, 1, 4, tpText, text_color=color.white, bgcolor=color.new(color.green, 30))
+
+    // Risk/Reward
+    rrText = str.tostring(riskRewardRatio, "#.#") + ":1"
+    table.cell(infoTable, 0, 5, "Risk/Reward:", text_color=color.black, bgcolor=color.new(color.white, 30))
+    table.cell(infoTable, 1, 5, rrText, text_color=color.black, bgcolor=color.new(color.orange, 50))
+
+// ==== Alerts ====
+// Lưu ý: hiện bạn đang tạo nhiều alertconditions dùng cùng 1 condition (vd: sellSignal dùng cho 2 alert).
+// Nếu không muốn trùng, chỉ để 1 alertcondition cho mỗi condition hoặc sửa điều kiện tương ứng.
+alertcondition(buySignal, title='SuperTrend Buy', message='SuperTrend Buy!')
+alertcondition(sellSignal, title='SuperTrend Sell', message='SuperTrend Sell!')
+alertcondition(sellSignal, title='SuperTrend Exit Long', message='SuperTrend Exit Long!')
+alertcondition(buySignal, title='SuperTrend Exit Short', message='SuperTrend Exit Short!')
+changeCond = trend != trend[1]
+alertcondition(changeCond, title='SuperTrend Direction Change', message='SuperTrend has changed direction!')
